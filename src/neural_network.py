@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray, ArrayLike
+from math import floor
 from typing import Callable
 from src.function_utils import sigmoid, relu, sigmoid_backward, relu_backward
 import h5py
@@ -118,10 +119,9 @@ class NeuralNetwork:
         training_set_labels: NDArray = None,
         learning_rate: float = 0.0075,
     ) -> None:
-        self.tX = training_set
-        self.tY = training_set_labels
+        self.training_set = training_set
+        self.training_set_labels = training_set_labels
         self.learning_rate = learning_rate
-
         self.iteration = 0
         self.layers = self.build_layers(layers_description)
         self.costs = []
@@ -139,6 +139,19 @@ class NeuralNetwork:
             ))
         return layers
 
+    def generate_mini_batches(data: NDArray, labels: NDArray, mini_batch_size: int = 64) -> list[tuple[NDArray, NDArray]]:
+        size = data.shape[1]
+        mini_batches = []
+        permutation = list(np.random.permutation(size))
+        shuffled_data = data[:, permutation]
+        shuffled_labels = labels[:, permutation]
+        for i in range(0, size, mini_batch_size):
+            mini_batch_X = shuffled_data[:, i:i+mini_batch_size]
+            mini_batch_Y = shuffled_labels[:, i:i+mini_batch_size]
+            mini_batch = (mini_batch_X, mini_batch_Y)
+            mini_batches.append(mini_batch)
+        return mini_batches
+
     def forward(self, data: NDArray, dropout: bool, epsilon_mask: NDArray = None) -> None:
         for layer in self.layers:
             if layer is self.layers.first:
@@ -155,7 +168,7 @@ class NeuralNetwork:
             if dropout:
                 layer.A = layer.dropout(layer.A, forward=True)
 
-    def backward(self, labels: NDArray, reg_lambd: float, dropout: bool) -> None:
+    def backward(self, data: NDArray, labels: NDArray, reg_lambd: float, dropout: bool) -> None:
         size = labels.shape[1]
         for layer in reversed(self.layers):
             if layer is self.layers.last:
@@ -163,7 +176,7 @@ class NeuralNetwork:
             layer.dZ = layer.act_fun_backward(layer.dA, layer.Z)
             layer.db = np.sum(layer.dZ, axis=1, keepdims=True)/size
             if layer is self.layers.first:
-                layer.dW = np.dot(layer.dZ, self.tX.T)/size + reg_lambd*layer.W/size
+                layer.dW = np.dot(layer.dZ, data.T)/size + reg_lambd*layer.W/size
             else:
                 layer.dW = np.dot(layer.dZ, layer.prev.A.T)/size + reg_lambd*layer.W/size
                 layer.prev.dA = np.dot(layer.W.T, layer.dZ)
@@ -188,9 +201,9 @@ class NeuralNetwork:
             cost += regularization_cost*reg_lambd/(2*size)
         return np.squeeze(cost)
 
-    def gradient_check(self, data: NDArray = None, labels: NDArray = None, epsilon=1e-7):
-        data = self.tX if data is None else data
-        labels = self.tY if labels is None else labels
+    def gradient_check(self, data: NDArray = None, labels: NDArray = None, epsilon: float = 1e-7):
+        data = self.training_set if data is None else data
+        labels = self.training_set_labels if labels is None else labels
         self.forward(data, False)
         self.backward(labels, 0, False)
         epsilon_mask = {}
@@ -236,13 +249,15 @@ class NeuralNetwork:
         reg_lambd: float = 0,
         dropout: bool = False
     ) -> None:
+        data = self.training_set if training_set is None else training_set
+        labels = self.training_set_labels if training_set_labels is None else training_set_labels
         for i in range(no_of_iterations):
-            self.forward(self.tX if training_set is None else training_set, dropout)
-            self.backward(self.tY if training_set_labels is None else training_set_labels, reg_lambd, dropout)
+            self.forward(data, dropout)
+            self.backward(data, labels, reg_lambd, dropout)
             self.update_layers()
             self.iteration += 1
             if self.iteration % 100 == 0 or i == no_of_iterations-1:
-                cost = self.compute_cost(self.tY if training_set is None else training_set_labels, regularization, reg_lambd)
+                cost = self.compute_cost(labels, regularization, reg_lambd)
                 logging.debug(f"Cost after iteration {self.iteration}: {cost}")
                 self.costs.append(cost)
 
