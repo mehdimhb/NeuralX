@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray, ArrayLike
 from typing import Callable
-from function_utils import sigmoid, relu, sigmoid_backward, relu_backward
+from src.function_utils import sigmoid, relu, sigmoid_backward, relu_backward
 import h5py
 import logging
 from src.confusion_matrix import ConfusionMatrix
@@ -130,7 +130,7 @@ class NeuralNetwork:
         layers = Layers()
         for layer in range(1, len(layers_description)):
             layers.add(Layer(
-                layer+1,
+                layer,
                 layers_description[layer][0],
                 layers_description[layer-1][0],
                 layers_description[layer][1],
@@ -139,12 +139,18 @@ class NeuralNetwork:
             ))
         return layers
 
-    def forward(self, data: NDArray, dropout: bool) -> None:
+    def forward(self, data: NDArray, dropout: bool, epsilon_mask: NDArray = None) -> None:
         for layer in self.layers:
             if layer is self.layers.first:
-                layer.Z = np.dot(layer.W, data) + layer.b
+                if epsilon_mask is None:
+                    layer.Z = np.dot(layer.W, data) + layer.b
+                else:
+                    layer.Z = np.dot(layer.W + epsilon_mask[layer][0], data) + layer.b + epsilon_mask[layer][1]
             else:
-                layer.Z = np.dot(layer.W, layer.prev.A) + layer.b
+                if epsilon_mask is None:
+                    layer.Z = np.dot(layer.W, layer.prev.A) + layer.b
+                else:
+                    layer.Z = np.dot(layer.W + epsilon_mask[layer][0], layer.prev.A) + layer.b + epsilon_mask[layer][1]
             layer.A = layer.act_fun_forward(layer.Z)
             if dropout:
                 layer.A = layer.dropout(layer.A, forward=True)
@@ -181,6 +187,45 @@ class NeuralNetwork:
                     regularization_cost += np.sum(np.square(layer.W))
             cost += regularization_cost*reg_lambd/(2*size)
         return np.squeeze(cost)
+
+    def gradient_check(self, data: NDArray = None, labels: NDArray = None, epsilon=1e-7):
+        data = self.tX if data is None else data
+        labels = self.tY if labels is None else labels
+        self.forward(data, False)
+        self.backward(labels, 0, False)
+        epsilon_mask = {}
+        for layer in self.layers:
+            if layer is self.layers.first:
+                grad = layer.dW.reshape(-1, 1)
+            else:
+                grad = np.concatenate((grad, layer.dW.reshape(-1, 1)), axis=0)
+            grad = np.concatenate((grad, layer.db.reshape(-1, 1)), axis=0)
+            epsilon_mask[layer] = (np.zeros(layer.W.shape), np.zeros(layer.b.shape))
+        grad_approximate = np.zeros((grad.shape[0], 1))
+        index = 0
+        for layer in self.layers:
+            for i in range(layer.W.shape[0]):
+                for j in range(layer.W.shape[1]):
+                    epsilon_mask[layer][0][i, j] = epsilon
+                    self.forward(data, False, epsilon_mask)
+                    J_plus = self.compute_cost(labels)
+                    epsilon_mask[layer][0][i, j] = -epsilon
+                    self.forward(data, False, epsilon_mask)
+                    J_minus = self.compute_cost(labels)
+                    grad_approximate[index] = (J_plus - J_minus)/(2*epsilon)
+                    index += 1
+                    epsilon_mask[layer][0][i, j] = 0
+            for i in range(layer.b.shape[0]):
+                epsilon_mask[layer][1][i, 0] = epsilon
+                self.forward(data, False, epsilon_mask)
+                J_plus = self.compute_cost(labels)
+                epsilon_mask[layer][1][i, 0] = -epsilon
+                self.forward(data, False, epsilon_mask)
+                J_minus = self.compute_cost(labels)
+                grad_approximate[index] = (J_plus - J_minus)/(2*epsilon)
+                index += 1
+                epsilon_mask[layer][1][i, 0] = 0
+        return np.linalg.norm(grad - grad_approximate)/(np.linalg.norm(grad) + np.linalg.norm(grad_approximate))
 
     def train(
         self,
@@ -232,8 +277,23 @@ if __name__ == "__main__":
         (1, 'he', 'sigmoid', 1)
     ]
     model = NeuralNetwork(layer, training_set, training_set_labels)
-    model.train(2000, dropout=True)
-    logging.debug(model.costs)
-    cm = ConfusionMatrix(model, test_set, test_set_labels)
-    logging.debug(cm)
-    logging.debug(cm.statistics())
+
+    data = np.array([[5, 2, 3, 7, 9, 10, 4, 7, 1, 6, 2, 4, 8, 6, 9, 3, 4, 5, 1, 6]])
+    label = np.array([[0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1]])
+    layer = [
+            (1, None, None, None),
+            (1, 'he', 'sigmoid', 1)
+        ]
+    #model = NeuralNetwork(layer, data, label)
+
+    g = model.gradient_check()
+    logging.debug(g)
+    if g > 2e-7:
+        logging.debug("wrong")
+    else:
+        logging.debug("correct")
+    #model.train(2000, dropout=True)
+    #logging.debug(model.costs)
+    #cm = ConfusionMatrix(model, test_set, test_set_labels)
+    #logging.debug(cm)
+    #logging.debug(cm.statistics())
