@@ -1,16 +1,7 @@
 import numpy as np
-from numpy.typing import NDArray, ArrayLike
-from math import floor
+from numpy.typing import NDArray
 from typing import Callable
 from src.function_utils import sigmoid, relu, sigmoid_backward, relu_backward
-import h5py
-import logging
-from src.confusion_matrix import ConfusionMatrix
-
-logging.basicConfig(
-    filename='file.log', filemode='w', level=logging.DEBUG,
-    format='%(message)s'
-)
 
 
 class Layer:
@@ -35,6 +26,10 @@ class Layer:
         self.dZ: NDArray
         self.A: NDArray
         self.dA: NDArray
+        self.vW = np.zeros(self.W.shape)
+        self.vb = np.zeros(self.b.shape)
+        self.sW = np.zeros(self.W.shape)
+        self.sb = np.zeros(self.b.shape)
         self._dropout: NDArray
         self.keep_probability = keeping_neuron_probability_in_dropout
         self.act_fun_forward, self.act_fun_backward = self.function_detection(activation_function)
@@ -59,7 +54,8 @@ class Layer:
             case 'he':
                 return np.random.randn(no_of_units, no_of_units_of_previous_layer)*np.sqrt(2/no_of_units_of_previous_layer)
             case 'xavier':
-                return np.random.randn(no_of_units, no_of_units_of_previous_layer)*np.sqrt(2/(no_of_units+no_of_units_of_previous_layer))
+                return np.random.randn(no_of_units, no_of_units_of_previous_layer)\
+                    * np.sqrt(2/(no_of_units+no_of_units_of_previous_layer))
 
     def function_detection(self, f: str) -> tuple[Callable[[NDArray], NDArray], Callable[[NDArray, NDArray], NDArray]]:
         match f:
@@ -117,12 +113,10 @@ class NeuralNetwork:
         layers_description: list[tuple[int, None, None] | tuple[int, str, str]],
         training_set: NDArray = None,
         training_set_labels: NDArray = None,
-        learning_rate: float = 0.0075,
     ) -> None:
         self.training_set = training_set
         self.training_set_labels = training_set_labels
-        self.learning_rate = learning_rate
-        self.iteration = 0
+        self.epoch = 0
         self.layers = self.build_layers(layers_description)
         self.costs = []
 
@@ -138,19 +132,6 @@ class NeuralNetwork:
                 layers_description[layer][3]
             ))
         return layers
-
-    def generate_mini_batches(data: NDArray, labels: NDArray, mini_batch_size: int = 64) -> list[tuple[NDArray, NDArray]]:
-        size = data.shape[1]
-        mini_batches = []
-        permutation = list(np.random.permutation(size))
-        shuffled_data = data[:, permutation]
-        shuffled_labels = labels[:, permutation]
-        for i in range(0, size, mini_batch_size):
-            mini_batch_X = shuffled_data[:, i:i+mini_batch_size]
-            mini_batch_Y = shuffled_labels[:, i:i+mini_batch_size]
-            mini_batch = (mini_batch_X, mini_batch_Y)
-            mini_batches.append(mini_batch)
-        return mini_batches
 
     def forward(self, data: NDArray, dropout: bool, epsilon_mask: NDArray = None) -> None:
         for layer in self.layers:
@@ -183,10 +164,35 @@ class NeuralNetwork:
                 if dropout:
                     layer.prev.dA = layer.prev.dropout(layer.prev.dA)
 
-    def update_layers(self) -> None:
-        for layer in self.layers:
-            layer.W = layer.W - self.learning_rate * layer.dW
-            layer.b = layer.b - self.learning_rate * layer.db
+    def update_layers(self, optimization: dict, learning_rate) -> None:
+        match optimization['name']:
+            case 'gradient descent':
+                for layer in self.layers:
+                    layer.W = layer.W - learning_rate * layer.dW
+                    layer.b = layer.b - learning_rate * layer.db
+            case 'momentum':
+                beta = optimization['beta']
+                for layer in self.layers:
+                    layer.vW = beta*layer.vW + (1-beta)*layer.dW
+                    layer.vb = beta*layer.vb + (1-beta)*layer.db
+                    layer.W = layer.W - learning_rate * layer.vW
+                    layer.b = layer.b - learning_rate * layer.vb
+            case 'adam':
+                t = optimization['t']
+                beta1 = optimization['beta1']
+                beta2 = optimization['beta2']
+                epsilon = optimization['epsilon']
+                for layer in self.layers:
+                    layer.vW = beta1*layer.vW + (1-beta1)*layer.dW
+                    layer.vb = beta1*layer.vb + (1-beta1)*layer.db
+                    vW_corrected = layer.vW/(1-np.power(beta1, t))
+                    vb_corrected = layer.vb/(1-np.power(beta1, t))
+                    layer.sW = beta2*layer.sW + (1-beta2)*np.power(layer.dW, 2)
+                    layer.sb = beta2*layer.sb + (1-beta2)*np.power(layer.db, 2)
+                    sW_corrected = layer.sW/(1-np.power(beta2, t))
+                    sb_corrected = layer.sb/(1-np.power(beta2, t))
+                    layer.W = layer.W - learning_rate * vW_corrected/(np.sqrt(sW_corrected)+epsilon)
+                    layer.b = layer.b - learning_rate * vb_corrected/(np.sqrt(sb_corrected)+epsilon)
 
     def compute_cost(self, labels: NDArray, regularization: str = None, reg_lambd: float = 0) -> float:
         size = labels.shape[1]
@@ -240,75 +246,63 @@ class NeuralNetwork:
                 epsilon_mask[layer][1][i, 0] = 0
         return np.linalg.norm(grad - grad_approximate)/(np.linalg.norm(grad) + np.linalg.norm(grad_approximate))
 
+    def generate_mini_batches(self, data: NDArray, labels: NDArray, mini_batch_size: int) -> list[tuple[NDArray, NDArray]]:
+        size = data.shape[1]
+        mini_batches = []
+        permutation = list(np.random.permutation(size))
+        shuffled_data = data[:, permutation]
+        shuffled_labels = labels[:, permutation]
+        for i in range(0, size, mini_batch_size):
+            mini_batch_X = shuffled_data[:, i:i+mini_batch_size]
+            mini_batch_Y = shuffled_labels[:, i:i+mini_batch_size]
+            mini_batch = (mini_batch_X, mini_batch_Y)
+            mini_batches.append(mini_batch)
+        return mini_batches
+
+    def update_learning_rate(self, learning_rate0, epoch, decay_rate, time_interval=1000):
+        return learning_rate0/(1+decay_rate*np.floor(epoch/time_interval))
+
     def train(
         self,
-        no_of_iterations,
+        no_of_epochs,
         training_set: NDArray = None,
         training_set_labels: NDArray = None,
         regularization: str = None,
         reg_lambd: float = 0,
-        dropout: bool = False
+        dropout: bool = False,
+        optimization: dict = {'name': 'gradient descent'},
+        is_mini_batch: bool = False,
+        mini_batch_size: int = 64,
+        learning_rate0: float = 0.5,
+        learning_rate_decay_rate: float = 0.3,
     ) -> None:
         data = self.training_set if training_set is None else training_set
         labels = self.training_set_labels if training_set_labels is None else training_set_labels
-        for i in range(no_of_iterations):
-            self.forward(data, dropout)
-            self.backward(data, labels, reg_lambd, dropout)
-            self.update_layers()
-            self.iteration += 1
-            if self.iteration % 100 == 0 or i == no_of_iterations-1:
-                cost = self.compute_cost(labels, regularization, reg_lambd)
-                logging.debug(f"Cost after iteration {self.iteration}: {cost}")
-                self.costs.append(cost)
+        for i in range(no_of_epochs):
+            learning_rate = self.update_learning_rate(learning_rate0, i, learning_rate_decay_rate)
+            if is_mini_batch:
+                mini_batches = self.generate_mini_batches(data, labels, mini_batch_size)
+                cost = 0
+                for mini_batch in mini_batches:
+                    self.forward(mini_batch[0], dropout)
+                    self.backward(mini_batch[0], mini_batch[1], reg_lambd, dropout)
+                    self.update_layers(optimization, learning_rate)
+                    if optimization['name'] == 'adam':
+                        optimization['t'] += 1
+                    cost += self.compute_cost(mini_batch[1], regularization, reg_lambd)
+                self.epoch += 1
+                if self.epoch % 100 == 0 or i == no_of_epochs-1:
+                    cost = cost/labels.shape[1]
+                    self.costs.append(cost)
+            else:
+                self.forward(data, dropout)
+                self.backward(data, labels, reg_lambd, dropout)
+                self.update_layers(optimization, learning_rate)
+                self.epoch += 1
+                if self.epoch % 100 == 0 or i == no_of_epochs-1:
+                    cost = self.compute_cost(labels, regularization, reg_lambd)
+                    self.costs.append(cost)
 
     def predict(self, data: NDArray):
         self.forward(data, False)
         return np.squeeze(self.layers.last.A)
-
-
-def load_dataset():
-    with h5py.File('data/train_catvnoncat.h5', 'r') as f:
-        training_set = np.array(f["train_set_x"][:])
-        training_set_labels = np.array(f["train_set_y"][:])
-
-    with h5py.File('data/test_catvnoncat.h5', 'r') as f:
-        test_set = np.array(f["test_set_x"][:])
-        test_set_labels = np.array(f["test_set_y"][:])
-
-    training_set = (training_set.reshape(training_set.shape[0], -1).T)/255
-    training_set_labels = training_set_labels.reshape((1, training_set_labels.shape[0]))
-    test_set = (test_set.reshape(test_set.shape[0], -1).T)/255
-    test_set_labels = test_set_labels.reshape((1, test_set_labels.shape[0]))
-
-    return training_set, training_set_labels, test_set, test_set_labels
-
-
-if __name__ == "__main__":
-    training_set, training_set_labels, test_set, test_set_labels = load_dataset()
-    layer = [
-        (12288, None, None, None),
-        (7, 'he', 'relu', 0.8),
-        (5, 'he', 'relu', 0.7),
-        (1, 'he', 'sigmoid', 1)
-    ]
-    model = NeuralNetwork(layer, training_set, training_set_labels)
-
-    data = np.array([[5, 2, 3, 7, 9, 10, 4, 7, 1, 6, 2, 4, 8, 6, 9, 3, 4, 5, 1, 6]])
-    label = np.array([[0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1]])
-    layer = [
-            (1, None, None, None),
-            (1, 'he', 'sigmoid', 1)
-        ]
-    #model = NeuralNetwork(layer, data, label)
-
-    g = model.gradient_check()
-    logging.debug(g)
-    if g > 2e-7:
-        logging.debug("wrong")
-    else:
-        logging.debug("correct")
-    #model.train(2000, dropout=True)
-    #logging.debug(model.costs)
-    #cm = ConfusionMatrix(model, test_set, test_set_labels)
-    #logging.debug(cm)
-    #logging.debug(cm.statistics())
