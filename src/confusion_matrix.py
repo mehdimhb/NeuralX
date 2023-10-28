@@ -1,13 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 from src.neural_network import NeuralNetwork
-import logging
 from math import floor, ceil, sqrt
-
-logging.basicConfig(
-    filename='file.log', filemode='w', level=logging.DEBUG,
-    format='%(message)s'
-)
 
 
 class ConfusionMatrix:
@@ -21,10 +15,9 @@ class ConfusionMatrix:
         threshold: float = 0.5,
         digits: int = 3
     ) -> None:
-        prediction = threshold_function(model.evaluate(data), threshold)
+        prediction = threshold_function(model.predict(data), threshold)
         labels = np.squeeze(labels)
         self.digits = digits
-        logging.debug(prediction)
         self.true_positive = np.sum(labels[labels == positive_class] == prediction[labels == positive_class], dtype=int)
         self.false_negative = np.sum(labels[labels == positive_class] != prediction[labels == positive_class], dtype=int)
         self.false_positive = np.sum(labels[labels == negative_class] != prediction[labels == negative_class], dtype=int)
@@ -65,8 +58,8 @@ class ConfusionMatrix:
         )
         s2 = " | ".join(
             [s200+s201+" "*(max_length-len(s201)),
-             " "*floor((len(s01)-len(s11))/2)+s21+" "*ceil((len(s01)-len(s11))/2),
-             " "*floor((len(s02)-len(s12))/2)+s22+" "*ceil((len(s02)-len(s12))/2)]
+             " "*floor((len(s01)-len(s21))/2)+s21+" "*ceil((len(s01)-len(s21))/2),
+             " "*floor((len(s02)-len(s22))/2)+s22+" "*ceil((len(s02)-len(s22))/2)]
         )
         return "\n"+("\n"+"-"*len(s0)+"\n").join([s0, s1, s2])+"\n"
 
@@ -237,15 +230,3 @@ def threshold_function(raw_prediction: NDArray, threshold: float):
     prediction[raw_prediction < threshold] = 0
     prediction[raw_prediction >= threshold] = 1
     return prediction
-
-
-if __name__ == '__main__':
-    data = np.array([[5, 2, 3, 7, 9, 10, 4, 7, 1, 6, 2, 4, 8, 6, 9, 3, 4, 5, 1, 6]])
-    label = np.array([[0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1]])
-    model = NeuralNetwork([1, 1], data, label, learning_rate=0.1)
-    model.train(1000)
-    test = np.array([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]])
-    test_label = np.array([[0, 0, 1, 0, 1, 1, 1, 1, 0, 1]])
-    cm = ConfusionMatrix(model, test, test_label)
-    logging.debug(cm)
-    logging.debug(cm.statistics())
