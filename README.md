@@ -57,6 +57,38 @@ cm = nx.ConfusionMatrix(model, test_set, test_set_labels)
 print(cm)
 print(cm.statistics())
 ```
+provided `training_set`, `training_set_labels`, `test_set` and `test_set_labels` the result should be like this
+```
+          Total = 300 | Predicted Positive = 145 | Predicted Negative = 155
+---------------------------------------------------------------------------
+Actual Positive = 150 |           123            |            27           
+---------------------------------------------------------------------------
+Actual Negative = 150 |            22            |           128           
+
+
+True Positive Rate (Sensitivity)(Recall): 0.82
+                     False Negative Rate: 0.18
+          False Positive Rate (Fall-out): 0.147
+        True Negative Rate (Specificity): 0.853
+   Positive Predictive Value (Precision): 0.848
+                     False Omission Rate: 0.174
+                    False discovery Rate: 0.152
+   Negative Predictive Value (Precision): 0.826
+                                Accuracy: 0.837
+                       Balanced Accuracy: 0.836
+                                F1 Score: 0.834
+        Matthews Correlation Coefficient: 0.673
+                   Fowlkes-Mallows Index: 0.834
+                           Jaccard Index: 0.715
+               Positive Likelihood Ratio: 5.578
+               Negative Likelihood Ratio: 0.211
+                   Diagnostic Odds Ratio: 26.436
+                              Prevalence: 0.5
+                    Prevalence Threshold: 0.297
+                            Informedness: 0.673
+                              Markedness: 0.674
+
+```
 
 ## Contributing
 
