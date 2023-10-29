@@ -1,6 +1,5 @@
 import numpy as np
 from numpy.typing import NDArray
-from typing import Callable
 from src.function_utils import sigmoid, relu, sigmoid_backward, relu_backward
 
 
@@ -57,7 +56,7 @@ class Layer:
                 return np.random.randn(no_of_units, no_of_units_of_previous_layer)\
                     * np.sqrt(2/(no_of_units+no_of_units_of_previous_layer))
 
-    def function_detection(self, f: str) -> tuple[Callable[[NDArray], NDArray], Callable[[NDArray, NDArray], NDArray]]:
+    def function_detection(self, f: str):
         match f:
             case 'sigmoid':
                 return sigmoid, sigmoid_backward
@@ -65,7 +64,7 @@ class Layer:
                 return relu, relu_backward
 
     def __repr__(self) -> str:
-        return f"{self.id}:{self.no_of_units}:{self.W.shape}"
+        return f"Layer{self.id}({self.no_of_units})"
 
 
 class Layers:
@@ -110,7 +109,7 @@ class Layers:
 class NeuralNetwork:
     def __init__(
         self,
-        layers_description: list[tuple[int, None, None] | tuple[int, str, str]],
+        layers_description: list,
         training_set: NDArray = None,
         training_set_labels: NDArray = None,
     ) -> None:
@@ -118,9 +117,9 @@ class NeuralNetwork:
         self.training_set_labels = training_set_labels
         self.epoch = 0
         self.layers = self.build_layers(layers_description)
-        self.costs = []
+        self.costs = {}
 
-    def build_layers(self, layers_description: list[tuple[int, None, None] | tuple[int, str, str]]) -> Layers:
+    def build_layers(self, layers_description: list) -> Layers:
         layers = Layers()
         for layer in range(1, len(layers_description)):
             layers.add(Layer(
@@ -164,7 +163,7 @@ class NeuralNetwork:
                 if dropout:
                     layer.prev.dA = layer.prev.dropout(layer.prev.dA)
 
-    def update_layers(self, optimization: dict, learning_rate) -> None:
+    def update_layers(self, optimization: dict, learning_rate: float) -> None:
         match optimization['name']:
             case 'gradient descent':
                 for layer in self.layers:
@@ -194,7 +193,7 @@ class NeuralNetwork:
                     layer.W = layer.W - learning_rate * vW_corrected/(np.sqrt(sW_corrected)+epsilon)
                     layer.b = layer.b - learning_rate * vb_corrected/(np.sqrt(sb_corrected)+epsilon)
 
-    def compute_cost(self, labels: NDArray, regularization: str = None, reg_lambd: float = 0) -> float:
+    def compute_cost(self, labels: NDArray, regularization: str, reg_lambd: float) -> float:
         size = labels.shape[1]
         cost = -(np.dot(labels, np.log(self.layers.last.A).T) + np.dot(1-labels, np.log(1-self.layers.last.A).T))/size
         if regularization is not None:
@@ -207,7 +206,7 @@ class NeuralNetwork:
             cost += regularization_cost*reg_lambd/(2*size)
         return np.squeeze(cost)
 
-    def gradient_check(self, data: NDArray = None, labels: NDArray = None, epsilon: float = 1e-7):
+    def gradient_check(self, data: NDArray = None, labels: NDArray = None, epsilon: float = 1e-7) -> str:
         data = self.training_set if data is None else data
         labels = self.training_set_labels if labels is None else labels
         self.forward(data, False)
@@ -244,7 +243,9 @@ class NeuralNetwork:
                 grad_approximate[index] = (J_plus - J_minus)/(2*epsilon)
                 index += 1
                 epsilon_mask[layer][1][i, 0] = 0
-        return np.linalg.norm(grad - grad_approximate)/(np.linalg.norm(grad) + np.linalg.norm(grad_approximate))
+        if np.linalg.norm(grad - grad_approximate)/(np.linalg.norm(grad) + np.linalg.norm(grad_approximate)) > epsilon:
+            return "Correct"
+        return "Incorrect"
 
     def generate_mini_batches(self, data: NDArray, labels: NDArray, mini_batch_size: int) -> list[tuple[NDArray, NDArray]]:
         size = data.shape[1]
@@ -259,7 +260,7 @@ class NeuralNetwork:
             mini_batches.append(mini_batch)
         return mini_batches
 
-    def update_learning_rate(self, learning_rate0, epoch, decay_rate, time_interval=1000):
+    def update_learning_rate(self, learning_rate0: float, epoch: int, decay_rate: float, time_interval: int) -> float:
         return learning_rate0/(1+decay_rate*np.floor(epoch/time_interval))
 
     def train(
@@ -275,11 +276,14 @@ class NeuralNetwork:
         mini_batch_size: int = 64,
         learning_rate0: float = 0.5,
         learning_rate_decay_rate: float = 0.3,
+        learning_rate_update_time_interval: int = 1000
     ) -> None:
         data = self.training_set if training_set is None else training_set
         labels = self.training_set_labels if training_set_labels is None else training_set_labels
         for i in range(no_of_epochs):
-            learning_rate = self.update_learning_rate(learning_rate0, i, learning_rate_decay_rate)
+            learning_rate = self.update_learning_rate(
+                learning_rate0, i, learning_rate_decay_rate, learning_rate_update_time_interval
+                )
             if is_mini_batch:
                 mini_batches = self.generate_mini_batches(data, labels, mini_batch_size)
                 cost = 0
@@ -290,18 +294,15 @@ class NeuralNetwork:
                     if optimization['name'] == 'adam':
                         optimization['t'] += 1
                     cost += self.compute_cost(mini_batch[1], regularization, reg_lambd)
-                self.epoch += 1
-                if self.epoch % 100 == 0 or i == no_of_epochs-1:
-                    cost = cost/labels.shape[1]
-                    self.costs.append(cost)
+                cost = cost/labels.shape[1]
             else:
                 self.forward(data, dropout)
                 self.backward(data, labels, reg_lambd, dropout)
                 self.update_layers(optimization, learning_rate)
-                self.epoch += 1
-                if self.epoch % 100 == 0 or i == no_of_epochs-1:
-                    cost = self.compute_cost(labels, regularization, reg_lambd)
-                    self.costs.append(cost)
+                cost = self.compute_cost(labels, regularization, reg_lambd)
+            self.epoch += 1
+            if self.epoch % 100 == 0 or i == no_of_epochs-1:
+                self.costs[self.epoch] = cost
 
     def predict(self, data: NDArray):
         self.forward(data, False)

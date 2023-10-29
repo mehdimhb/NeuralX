@@ -1,5 +1,5 @@
 import numpy as np
-from numpy.typing import NDArray, ArrayLike
+from numpy.typing import NDArray
 
 
 def sigmoid(Z: NDArray) -> NDArray:
