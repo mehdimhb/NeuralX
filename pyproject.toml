@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neuralx"
+version = "1.0.6"
+authors = [
+  { name="Mehdi Mohebbi", email="mehdi.mhb3@gmail.com" },
+]
+description = "a user-friendly Python package for neural networks."
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/mehdimhb/NeuralX"
+"Bug Tracker" = "https://github.com/mehdimhb/NeuralX/issues"
