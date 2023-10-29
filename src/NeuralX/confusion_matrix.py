@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
-from src.neural_network import NeuralNetwork
+from neuralx.neural_network import NeuralNetwork
 from math import floor, ceil, sqrt
 
 

@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
-from src.function_utils import sigmoid, relu, sigmoid_backward, relu_backward
+from neuralx.function_utils import sigmoid, relu, sigmoid_backward, relu_backward
 
 
 class Layer:
@@ -265,25 +265,28 @@ class NeuralNetwork:
 
     def train(
         self,
-        no_of_epochs,
         training_set: NDArray = None,
         training_set_labels: NDArray = None,
+        no_of_epochs: int = 1000,
         regularization: str = None,
         reg_lambd: float = 0,
         dropout: bool = False,
         optimization: dict = {'name': 'gradient descent'},
         is_mini_batch: bool = False,
         mini_batch_size: int = 64,
-        learning_rate0: float = 0.5,
+        is_learning_rate_decaying: bool = False,
+        learning_rate: float = 0.01,
         learning_rate_decay_rate: float = 0.3,
         learning_rate_update_time_interval: int = 1000
     ) -> None:
         data = self.training_set if training_set is None else training_set
         labels = self.training_set_labels if training_set_labels is None else training_set_labels
+        learning_rate0 = learning_rate
         for i in range(no_of_epochs):
-            learning_rate = self.update_learning_rate(
-                learning_rate0, i, learning_rate_decay_rate, learning_rate_update_time_interval
-                )
+            if is_learning_rate_decaying:
+                learning_rate = self.update_learning_rate(
+                    learning_rate0, i, learning_rate_decay_rate, learning_rate_update_time_interval
+                    )
             if is_mini_batch:
                 mini_batches = self.generate_mini_batches(data, labels, mini_batch_size)
                 cost = 0
